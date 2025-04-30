@@ -10,3 +10,10 @@
 	path = rule_data/v2ray-rules-dat
 	url = https://github.com/Loyalsoldier/v2ray-rules-dat.git
 	branch = release
+[submodule "rule_data/domain-list-community"]
+	path = rule_data/domain-list-community
+	url = https://github.com/v2fly/domain-list-community.git
+[submodule "rule_data/geoip"]
+	path = rule_data/geoip
+	url = https://github.com/Loyalsoldier/geoip.git
+	branch = release
