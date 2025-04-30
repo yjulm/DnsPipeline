@@ -128,6 +128,12 @@ plugins:
           - has_wanted_ans
         exec: accept
 
+  - tag: "processReject"
+    type: "sequence"
+    args:
+      - exec: query_summary processReject
+      - exec: reject 3
+
   - tag: "processEntry"
     type: "sequence"
     args:
@@ -136,7 +142,7 @@ plugins:
       # 优先阻止广告查询
       - matches:
           - qname $domainReject
-        exec: reject 3
+        exec: jump processReject
 
       # 直接国内查询
       - matches:
