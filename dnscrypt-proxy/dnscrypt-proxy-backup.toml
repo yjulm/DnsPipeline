@@ -1,0 +1,40 @@
+
+server_names = ['opendns-doh', 'quad9-doh']
+listen_addresses = ['127.0.0.1:8353', '[::1]:8353', '0.0.0.0:8353', '[::]:8353']
+timeout = 2000
+keepalive = 30
+lb_strategy = 'first'
+
+bootstrap_resolvers = ['156.154.70.1:53', '129.250.35.250:53']
+ignore_system_dns = true
+netprobe_timeout = 60
+netprobe_address = '1.2.4.8:53'
+
+block_ipv6 = false
+block_unqualified = true
+block_undelegated = true
+
+cache = true
+cache_size=65536
+
+[dns64]
+prefix = ['64:ff9b::/96', '64:fe80::/96']
+
+[static]
+[static.'opendns-scrypt']
+stamp = 'sdns://AQEAAAAAAAAADDE0Ni4xMTIuNDEuNCC3NRFAIG8iXT4r2CLX_WkeocM8yNZmjQy-BL-rykP7eRsyLmRuc2NyeXB0LWNlcnQub3BlbmRucy5jb20'
+
+[static.'quad9-scrypt']
+stamp = 'sdns://AQYAAAAAAAAAEzE0OS4xMTIuMTEyLjEwOjg0NDMgZ8hHuMh1jNEgJFVDvnVnRt803x2EwAuMRwNo34Idhj4ZMi5kbnNjcnlwdC1jZXJ0LnF1YWQ5Lm5ldA'
+
+[static.'opendns-doh']
+stamp = 'sdns://AgYAAAAAAAAAAAAXZG9oLnNhbmRib3gub3BlbmRucy5jb20KL2Rucy1xdWVyeQ'
+
+[static.'quad9-doh']
+stamp = 'sdns://AgYAAAAAAAAAAAAPZG5zMTAucXVhZDkubmV0Ci9kbnMtcXVlcnk'
+
+[static.'alidns-doh']
+stamp = 'sdns://AgYAAAAAAAAAAAAOZG5zLmFsaWRucy5jb20KL2Rucy1xdWVyeQ'
+
+[static.'dnspod-doh']
+stamp = 'sdns://AgYAAAAAAAAAAAAHZG5zLnB1YgovZG5zLXF1ZXJ5'

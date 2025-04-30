@@ -1,0 +1,160 @@
+log:
+  level: info # 日志级别。可选 "debug" "info" "warn" "error"。默认 "info"。
+  production: false
+
+plugins:
+  # 规则导入
+  - tag: "domainDirect"
+    type: "domain_set"
+    args:
+      files:
+        - "../rule_data/v2ray-rules-dat/direct-list.txt"
+        - "../rule_data/v2ray-rules-dat/china-list.txt"
+        - "../rule_data/v2ray-rules-dat/apple-cn.txt"
+        - "../rule_data/v2ray-rules-dat/google-cn.txt"
+        - "../rule_data/domain-list-custom/cn.txt"
+        - "../rule_data/domain-list-custom/geolocation-cn.txt"
+        - "../rule_data/domain-list-custom/tld-cn.txt"
+
+  - tag: "domainProxy"
+    type: "domain_set"
+    args:
+      files:
+        - "../rule_data/v2ray-rules-dat/proxy-list.txt"
+        - "../rule_data/v2ray-rules-dat/gfw.txt"
+        - "../rule_data/v2ray-rules-dat/greatfire.txt"
+        - "../rule_data/domain-list-custom/geolocation-!cn.txt"
+        - "../rule_data/domain-list-custom/tld-!cn.txt"
+
+  - tag: "domainReject"
+    type: "domain_set"
+    args:
+      files:
+        - "../rule_data/v2ray-rules-dat/reject-list.txt"
+        - "../rule_data/domain-list-custom/category-ads-all.txt"
+        - "../rule_data/domain-list-custom/private.txt"
+
+  - tag: "ipDirect"
+    type: "ip_set"
+    args:
+      files:
+        - "../rule_data/GeoIP2-CN/CN-ip-cidr.txt"
+
+  # 转发设置
+  - tag: "forwardDirect"
+    type: "forward"
+    args:
+      upstreams:
+        addr: "udp://127.0.0.1:8153"
+
+  - tag: "forwardProxy"
+    type: "forward"
+    args:
+      upstreams:
+        addr: "udp://127.0.0.1:8253"
+
+  - tag: "forwardBackup"
+    type: "forward"
+    args:
+      upstreams:
+        addr: "udp://127.0.0.1:8353"
+
+  # 回落查询
+  - tag: "fallbackDirect"
+    type: "sequence"
+    args:
+      - exec: $forwardDirect # 使用国内DOH
+      - exec: query_summary forwardDirect
+
+  - tag: "fallbackProxy"
+    type: "sequence"
+    args:
+      - exec: $forwardProxy # 使用国际加密
+      - exec: query_summary forwardProxy
+      - matches:
+          - mark 8153
+          - has_resp
+          - "!resp_ip $ipDirect" #强制要求国内IP
+        exec: drop_resp
+
+  - tag: "fallbackBackup"
+    type: "sequence"
+    args:
+      - exec: $forwardBackup # 使用国际DOH
+      - exec: query_summary forwardBackup
+
+  - tag: "fallbackProcess"
+    type: "sequence"
+    args:
+      - exec: mark 8153 # 优先国内IP
+      - exec: jump fallbackProxy
+      - matches:
+          - "!has_wanted_ans"
+        exec: jump fallbackBackup
+
+  - tag: "fallbackEntry"
+    type: "fallback"
+    args:
+      primary: fallbackProcess
+      secondary: fallbackDirect
+      threshold: 600
+      always_standby: true
+
+  # 处理过程
+  - tag: "processDirect"
+    type: "sequence"
+    args:
+      - exec: query_summary processDirect
+      - exec: jump fallbackDirect
+      - matches:
+          - has_wanted_ans
+        exec: accept
+
+  - tag: "processProxy"
+    type: "sequence"
+    args:
+      - exec: query_summary processProxy
+      - exec: jump fallbackProxy
+      - matches:
+          - has_wanted_ans
+        exec: accept
+
+  - tag: "processBackup"
+    type: "sequence"
+    args:
+      - exec: query_summary processBackup
+      - exec: jump fallbackBackup
+      - matches:
+          - has_wanted_ans
+        exec: accept
+
+  - tag: "processEntry"
+    type: "sequence"
+    args:
+      - exec: prefer_ipv4
+
+      # 优先阻止广告查询
+      - matches:
+          - qname $domainReject
+        exec: reject 3
+
+      # 直接国内查询
+      - matches:
+          - qname $domainDirect
+        exec: jump processDirect
+
+      # 直接国际查询
+      - matches:
+          - qname $domainProxy
+        exec: jump processProxy
+
+      # 不在规则中处理，则优先国内IP
+      - exec: query_summary fallbackEntry
+      - exec: $fallbackEntry
+
+  # 服务入口
+  - tag: ""
+    type: "udp_server"
+    args:
+      entry: "processEntry"
+      listen: 0.0.0.0:8053
