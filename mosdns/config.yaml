@@ -38,7 +38,7 @@ plugins:
     type: "ip_set"
     args:
       files:
-        - "../rule_data/GeoIP2-CN/CN-ip-cidr.txt"
+        - "../rule_data/geoip/text/cn.txt"
 
   # 转发设置
   - tag: "forwardDirect"

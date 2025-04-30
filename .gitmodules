@@ -1,7 +1,3 @@
-[submodule "rule_data/GeoIP2-CN"]
-	path = rule_data/GeoIP2-CN
-	url = https://github.com/Hackl0us/GeoIP2-CN.git
-	branch = release
 [submodule "rule_data/domain-list-custom"]
 	path = rule_data/domain-list-custom
 	url = https://github.com/Loyalsoldier/domain-list-custom.git
