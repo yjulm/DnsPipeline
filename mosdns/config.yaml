@@ -1,3 +1,5 @@
+# DNS协议细节再此处 https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml
+
 log:
   level: info # 日志级别。可选 "debug" "info" "warn" "error"。默认 "info"。
   production: false
@@ -60,102 +62,164 @@ plugins:
         addr: "udp://127.0.0.1:8353"
 
   # 回落查询
+  - tag: "fallbackDrop"
+    type: "sequence"
+    args:
+      - exec: drop_resp
+      - matches: mark 1111
+        exec: query_summary fallbackDrop
+
+  - tag: "fallbackCacheSet"
+    type: "sequence"
+    args:
+      - matches: mark 1111
+        exec: query_summary TryCacheSet
+
+      - matches:
+          - mark 2222 # 仅针对ip地址查询
+          - has_wanted_ans
+        exec: cache 65535
+      - matches:
+          - mark 1111
+          - has_wanted_ans
+        exec: query_summary fallbackCacheSet
+
+  - tag: "fallbackCacheGet"
+    type: "sequence"
+    args:
+      - matches: mark 1111
+        exec: query_summary TryCacheGet
+
+      - matches: mark 2222 # 仅针对ip地址查询
+        exec: cache 65535
+      - matches:
+          - mark 1111
+          - has_resp
+        exec: query_summary fallbackCacheGet
+
+  - tag: "fallbackCache"
+    type: "sequence"
+    args:
+      - matches: mark 655351
+        exec: jump fallbackCacheSet
+      - matches: mark 655351
+        exec: return
+
+      - matches: mark 655350
+        exec: jump fallbackCacheGet
+      - matches: mark 655350
+        exec: return
+
   - tag: "fallbackDirect"
     type: "sequence"
     args:
       - exec: $forwardDirect # 使用国内DOH
-      - exec: query_summary forwardDirect
 
   - tag: "fallbackProxy"
     type: "sequence"
     args:
       - exec: $forwardProxy # 使用国际加密
-      - exec: query_summary forwardProxy
       - matches:
           - mark 8153
-          - has_resp
+          - mark 2222 # 仅针对ip地址查询
+          - has_wanted_ans
           - "!resp_ip $ipDirect" #强制要求国内IP
-        exec: drop_resp
+        exec: jump fallbackDrop
 
   - tag: "fallbackBackup"
     type: "sequence"
     args:
-      - exec: $forwardBackup # 使用国际DOH
-      - exec: query_summary forwardBackup
+      - matches: mark 1111
+        exec: query_summary fallbackBackup
 
-  - tag: "fallbackProcess"
+      - exec: $forwardBackup # 使用国际DOH
+      - matches: has_wanted_ans
+        exec: mark 655351 # 标记写入cache
+      - exec: jump fallbackCache
+
+  - tag: "fallbackPrimary"
     type: "sequence"
     args:
-      - exec: mark 8153 # 优先国内IP
+      - matches: mark 1111
+        exec: query_summary fallbackPrimary
+
+      - exec: mark 655350 # 标记获取cache
+      - exec: jump fallbackCache
+      - matches: has_resp
+        exec: accept
+
+      - exec: mark 8153 # 8153标记不在所有规则中的，优先查询国内IP
       - exec: jump fallbackProxy
-      - matches:
-          - "!has_wanted_ans"
+      - matches: "!has_wanted_ans"
         exec: jump fallbackBackup
+
+  - tag: "fallbackSecondary"
+    type: "sequence"
+    args:
+      - matches: mark 1111
+        exec: query_summary fallbackSecondary
+      - exec: jump fallbackDirect
 
   - tag: "fallbackEntry"
     type: "fallback"
     args:
-      primary: fallbackProcess
-      secondary: fallbackDirect
-      threshold: 600
-      always_standby: true
+      primary: fallbackPrimary
+      secondary: fallbackSecondary
+      threshold: 700
+      always_standby: false
 
   # 处理过程
   - tag: "processDirect"
     type: "sequence"
     args:
-      - exec: query_summary processDirect
+      - matches: mark 1111
+        exec: query_summary processDirect
       - exec: jump fallbackDirect
-      - matches:
-          - has_wanted_ans
-        exec: accept
 
   - tag: "processProxy"
     type: "sequence"
     args:
-      - exec: query_summary processProxy
+      - matches: mark 1111
+        exec: query_summary processProxy
       - exec: jump fallbackProxy
-      - matches:
-          - has_wanted_ans
-        exec: accept
-
-  - tag: "processBackup"
-    type: "sequence"
-    args:
-      - exec: query_summary processBackup
-      - exec: jump fallbackBackup
-      - matches:
-          - has_wanted_ans
-        exec: accept
 
   - tag: "processReject"
     type: "sequence"
     args:
-      - exec: query_summary processReject
+      - matches: mark 1111
+        exec: query_summary processReject
       - exec: reject 3
 
   - tag: "processEntry"
     type: "sequence"
     args:
-      - exec: prefer_ipv4
+      - exec: prefer_ipv4 # ipv4 优先
+      - exec: mark 1111 # 控制 log 启用
+
+      # 方便调试时分辨查询起始位置
+      - matches: mark 1111
+        exec: query_summary ------------
+
+      # 2222 标记当前是 A/AAAA 这样的IP地址查询
+      # 4444/6666 分别标记 ipv4/ipv6 查询
+      - matches: qtype 1
+        exec: mark 2222 4444
+      - matches: qtype 28
+        exec: mark 2222 6666
 
       # 优先阻止广告查询
-      - matches:
-          - qname $domainReject
-        exec: jump processReject
+      - matches: qname $domainReject
+        exec: goto processReject
 
       # 直接国内查询
-      - matches:
-          - qname $domainDirect
-        exec: jump processDirect
+      - matches: qname $domainDirect
+        exec: goto processDirect
 
       # 直接国际查询
-      - matches:
-          - qname $domainProxy
-        exec: jump processProxy
+      - matches: qname $domainProxy
+        exec: goto processProxy
 
       # 不在规则中处理，则优先国内IP
-      - exec: query_summary fallbackEntry
       - exec: $fallbackEntry
 
   # 服务入口
