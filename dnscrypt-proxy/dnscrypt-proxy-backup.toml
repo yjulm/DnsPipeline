@@ -1,5 +1,5 @@
 
-server_names = ['opendns-doh', 'quad9-doh']
+server_names = ['opendns-doh', 'cloudflare-doh']
 listen_addresses = ['127.0.0.1:8353', '[::1]:8353', '0.0.0.0:8353', '[::]:8353']
 timeout = 2000
 keepalive = 30
@@ -32,6 +32,9 @@ stamp = 'sdns://AgYAAAAAAAAAAAAXZG9oLnNhbmRib3gub3BlbmRucy5jb20KL2Rucy1xdWVyeQ'
 
 [static.'quad9-doh']
 stamp = 'sdns://AgYAAAAAAAAAAAAPZG5zMTAucXVhZDkubmV0Ci9kbnMtcXVlcnk'
+
+[static.'cloudflare-doh']
+stamp = 'sdns://AgcAAAAAAAAAAAASZG5zLmNsb3VkZmxhcmUuY29tCi9kbnMtcXVlcnk'
 
 [static.'alidns-doh']
 stamp = 'sdns://AgYAAAAAAAAAAAAOZG5zLmFsaWRucy5jb20KL2Rucy1xdWVyeQ'

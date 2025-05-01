@@ -33,6 +33,9 @@ stamp = 'sdns://AgYAAAAAAAAAAAAXZG9oLnNhbmRib3gub3BlbmRucy5jb20KL2Rucy1xdWVyeQ'
 [static.'quad9-doh']
 stamp = 'sdns://AgYAAAAAAAAAAAAPZG5zMTAucXVhZDkubmV0Ci9kbnMtcXVlcnk'
 
+[static.'cloudflare-doh']
+stamp = 'sdns://AgcAAAAAAAAAAAASZG5zLmNsb3VkZmxhcmUuY29tCi9kbnMtcXVlcnk'
+
 [static.'alidns-doh']
 stamp = 'sdns://AgYAAAAAAAAAAAAOZG5zLmFsaWRucy5jb20KL2Rucy1xdWVyeQ'
 
