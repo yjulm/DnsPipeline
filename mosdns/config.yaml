@@ -75,9 +75,7 @@ plugins:
       - matches: mark 1111
         exec: query_summary TryCacheSet
 
-      - matches:
-          - mark 2222 # 仅针对ip地址查询
-          - has_wanted_ans
+      - matches: has_wanted_ans
         exec: cache 65535
       - matches:
           - mark 1111
@@ -90,8 +88,7 @@ plugins:
       - matches: mark 1111
         exec: query_summary TryCacheGet
 
-      - matches: mark 2222 # 仅针对ip地址查询
-        exec: cache 65535
+      - exec: cache 65535
       - matches:
           - mark 1111
           - has_resp
@@ -110,6 +107,22 @@ plugins:
       - matches: mark 655350
         exec: return
 
+  - tag: "fallbackCachePush"
+    type: "sequence"
+    args:
+      - matches: mark 2222 # 仅针对ip地址查询
+        exec: mark 655351 # 标记写入cache
+      - matches: mark 2222
+        exec: jump fallbackCache
+
+  - tag: "fallbackCachePull"
+    type: "sequence"
+    args:
+      - matches: mark 2222 # 仅针对ip地址查询
+        exec: mark 655350 # 标记获取cache
+      - matches: mark 2222
+        exec: jump fallbackCache
+
   - tag: "fallbackDirect"
     type: "sequence"
     args:
@@ -120,22 +133,36 @@ plugins:
     args:
       - exec: $forwardProxy # 使用国际加密
       - matches:
-          - mark 8153
+          - mark 8153 # 优先国内IP
           - mark 2222 # 仅针对ip地址查询
           - has_wanted_ans
-          - "!resp_ip $ipDirect" #强制要求国内IP
+          - "!resp_ip $ipDirect" # 应答是否是国内IP
         exec: jump fallbackDrop
 
-  - tag: "fallbackBackup"
+  - tag: "fallbackTryProxy"
     type: "sequence"
     args:
       - matches: mark 1111
-        exec: query_summary fallbackBackup
+        exec: query_summary fallbackTryProxy
 
+      - matches: mark 2333 # 查询不在所有规则中
+        exec: mark 8153 # 8153标记操作应当优先获取国内IP
+      - exec: jump fallbackProxy
+
+  - tag: "fallbackTryBackup"
+    type: "sequence"
+    args:
+      - matches: mark 1111
+        exec: query_summary fallbackTryBackup
       - exec: $forwardBackup # 使用国际DOH
-      - matches: has_wanted_ans
-        exec: mark 655351 # 标记写入cache
-      - exec: jump fallbackCache
+
+  - tag: "fallbackCheckQuery"
+    type: "sequence"
+    args:
+      - matches:
+          - "!mark 2222" # 非IP地址查询
+          - has_resp # 且有应答，例如 CNAME 应答
+        exec: accept
 
   - tag: "fallbackPrimary"
     type: "sequence"
@@ -143,15 +170,25 @@ plugins:
       - matches: mark 1111
         exec: query_summary fallbackPrimary
 
-      - exec: mark 655350 # 标记获取cache
-      - exec: jump fallbackCache
+      - exec: jump fallbackCachePull # 先尝试拉取cache
       - matches: has_resp
         exec: accept
 
-      - exec: mark 8153 # 8153标记不在所有规则中的，优先查询国内IP
-      - exec: jump fallbackProxy
-      - matches: "!has_wanted_ans"
-        exec: jump fallbackBackup
+      - exec: jump fallbackTryProxy #没有cache 再代理查询
+      - exec: jump fallbackCheckQuery
+
+      # 实际执行cache写入的操作，目前是不提供自主控制的
+      # 依旧实现cache写入的过程是为了方便调试运行逻辑
+      - matches: has_wanted_ans
+        exec: jump fallbackCachePush # 尝试将上方的代理查询应答IP推入cache
+      - matches: has_wanted_ans
+        exec: accept
+
+      # 代理查询没有期望的应答则执行备用方案
+      - exec: jump fallbackTryBackup
+      - exec: jump fallbackCheckQuery
+      - matches: has_wanted_ans
+        exec: jump fallbackCachePush # 尝试将上方的备用方案应答IP推入cache
 
   - tag: "fallbackSecondary"
     type: "sequence"
@@ -181,7 +218,7 @@ plugins:
     args:
       - matches: mark 1111
         exec: query_summary processProxy
-      - exec: jump fallbackProxy
+      - exec: jump fallbackPrimary # 不需要cache，则可以直接 jump fallbackProxy
 
   - tag: "processReject"
     type: "sequence"
@@ -194,11 +231,11 @@ plugins:
     type: "sequence"
     args:
       - exec: prefer_ipv4 # ipv4 优先
-      - exec: mark 1111 # 控制 log 启用
 
-      # 方便调试时分辨查询起始位置
+      # 1111 标记用来控制 log 启用状态，注释下方行则禁用 log
+      - exec: mark 1111
       - matches: mark 1111
-        exec: query_summary ------------
+        exec: query_summary ------------ # 方便调试时分辨查询的起始位置
 
       # 2222 标记当前是 A/AAAA 这样的IP地址查询
       # 4444/6666 分别标记 ipv4/ipv6 查询
@@ -219,7 +256,8 @@ plugins:
       - matches: qname $domainProxy
         exec: goto processProxy
 
-      # 不在规则中处理，则优先国内IP
+      # 2333 标记不在规则中的查询，则优先国内IP
+      - exec: mark 2333
       - exec: $fallbackEntry
 
   # 服务入口
