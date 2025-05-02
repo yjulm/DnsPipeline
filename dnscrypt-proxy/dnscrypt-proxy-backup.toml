@@ -1,9 +1,10 @@
 
-server_names = ['opendns-doh', 'cloudflare-doh']
+server_names = ['rethink-doh', 'cloudflare-doh']
 listen_addresses = ['127.0.0.1:8353', '[::1]:8353', '0.0.0.0:8353', '[::]:8353']
-timeout = 2000
+timeout = 600
 keepalive = 30
 lb_strategy = 'first'
+lb_estimator = true
 
 bootstrap_resolvers = ['156.154.70.1:53', '129.250.35.250:53']
 ignore_system_dns = true
@@ -13,12 +14,10 @@ netprobe_address = '1.2.4.8:53'
 block_ipv6 = false
 block_unqualified = true
 block_undelegated = true
+reject_ttl = 10
 
-cache = true
-cache_size=65536
-
-[dns64]
-prefix = ['64:ff9b::/96', '64:fe80::/96']
+cache = false
+cache_size = 65535
 
 [static]
 [static.'opendns-scrypt']
@@ -32,6 +31,9 @@ stamp = 'sdns://AgYAAAAAAAAAAAAXZG9oLnNhbmRib3gub3BlbmRucy5jb20KL2Rucy1xdWVyeQ'
 
 [static.'quad9-doh']
 stamp = 'sdns://AgYAAAAAAAAAAAAPZG5zMTAucXVhZDkubmV0Ci9kbnMtcXVlcnk'
+
+[static.'rethink-doh']
+stamp = 'sdns://AgYAAAAAAAAAAAAUYmFzaWMucmV0aGlua2Rucy5jb20KL2Rucy1xdWVyeQ'
 
 [static.'cloudflare-doh']
 stamp = 'sdns://AgcAAAAAAAAAAAASZG5zLmNsb3VkZmxhcmUuY29tCi9kbnMtcXVlcnk'
