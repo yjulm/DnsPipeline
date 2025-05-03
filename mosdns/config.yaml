@@ -11,7 +11,7 @@ log:
   production: false
 
 plugins:
-  # 规则导入
+  # ================================ 规则导入 ================================
   - tag: "domainDirect"
     type: "domain_set"
     args:
@@ -51,7 +51,7 @@ plugins:
       files:
         - "../rule_data/geoip/text/cn.txt"
 
-  # 转发设置
+  # ================================ 转发设置 ================================
   - tag: "forwardDirect"
     type: "forward"
     args:
@@ -70,7 +70,7 @@ plugins:
       upstreams:
         addr: "udp://127.0.0.1:8353"
 
-  # 回落查询
+  # ================================ 应答处理 ================================
   - tag: "fallbackCheckDrop" # 用作避让 fallback 触发
     type: "sequence"
     args:
@@ -89,71 +89,68 @@ plugins:
       - matches: mark 1111
         exec: query_summary fallbackDrop
 
-  - tag: "fallbackCacheSet"
+  - tag: "fallbackTryDrop"
     type: "sequence"
     args:
-      - matches: mark 1111
-        exec: query_summary TryCacheSet
-
-      - matches: has_wanted_ans
-        exec: cache 65535
       - matches:
-          - mark 1111
+          - mark 8153 # 优先国内IP
+          - mark 2222 # ip地址查询
           - has_wanted_ans
-        exec: query_summary fallbackCacheSet
+          - "!resp_ip $ipDirect" # 应答是否是国内IP
+        exec: jump fallbackDrop
 
-  - tag: "fallbackCacheGet"
+  - tag: "fallbackFilterIpResp"
     type: "sequence"
     args:
-      - matches: mark 1111
-        exec: query_summary TryCacheGet
+      - matches:
+          - "!mark 2222" # 非IP地址查询
+          - has_resp # 且有应答，例如 CNAME 应答
+        exec: accept
 
-      - exec: cache 65535
+  - tag: "fallbackCheckResp"
+    type: "sequence"
+    args:
+      - exec: jump fallbackFilterIpResp
+
+      - matches:
+          - mark 2222 # ip地址查询
+          - has_resp # 且有应答
+          - "!has_wanted_ans" # 且没有期望值，
+        exec: ttl 120 # 限制非预期应答的存活时间为 2 分钟
+
+      # # 处理 www.bing.com 这类请求 AAAA 记录时，会返回 CNAME 和 SOA 记录，但没有IP地址
+      # - matches:
+      #     - mark 2222 # ip地址查询
+      #     - has_resp # 且有应答
+      #     - "!has_wanted_ans" # 且没有期望值，
+      #     - cname regexp:\S+ # 有匹配到 CNAME
+      #   exec: mark 22022 # 标记有找到CNAME
+
+      # # 处理 github.com 这类请求 AAAA 记录时，会返回 SOA 记录，但没有 CNAME 和 IP 地址
+      # - matches:
+      #     - mark 2222 # ip地址查询
+      #     - has_resp # 且有应答
+      #     - "!has_wanted_ans" # 且没有期望值，
+      #     - "!cname regexp:\\S+" # 且没有匹配任何CNAME
+      #   exec: mark 22011 # 标记没有CNAME，而是仅 SOA
+
+      # 如果不丢弃这些非期望的应答，从而达到缓存加速下一次查询，
+      # 则需要修改 fallbackCachePull 下方的匹配条件为 has_resp, 从而使缓存被 accept
+      # 但这些非期望的缓存，会影响要求实时结果的查询，所以暂时不丢弃
+      - matches:
+          - mark 2222 # ip地址查询
+          - has_resp # 且有应答
+          - "!has_wanted_ans" # 且没有期望值，
+          - "!mark 2200" # 没有启用非预期应答的cache加速
+        exec: jump fallbackDrop # 丢弃这个应答，否者系统在查询结束后自动写入缓存
+
+  - tag: "fallbackPrintResp"
+    type: "sequence"
+    args:
       - matches:
           - mark 1111
           - has_resp
-        exec: query_summary fallbackCacheGet
-
-  - tag: "fallbackCache"
-    type: "sequence"
-    args:
-      - matches: mark 655351
-        exec: jump fallbackCacheSet # 不能用goto代替jump，goto 进入调用链执行完后不会返回上一层
-      - matches: mark 655351
-        exec: return
-
-      - matches: mark 655350
-        exec: jump fallbackCacheGet
-      - matches: mark 655350
-        exec: return
-
-  # 实际执行cache写入的操作，目前是不提供指令来自主控制的
-  # 依旧实现cache写入的过程是为了方便调试运行逻辑
-  - tag: "fallbackCachePush"
-    type: "sequence"
-    args:
-      - matches: mark 2222 # ip地址查询
-        exec: mark 655351 # 标记写入cache
-      - matches: mark 2222
-        exec: jump fallbackCache
-
-  - tag: "fallbackCachePull"
-    type: "sequence"
-    args:
-      - matches: mark 2222 # ip地址查询
-        exec: mark 655350 # 标记获取cache
-      - matches: mark 2222
-        exec: jump fallbackCache
-
-  - tag: "fallbackDirect"
-    type: "sequence"
-    args:
-      - exec: $forwardDirect # 使用国内DOH
-
-  - tag: "fallbackProxy"
-    type: "sequence"
-    args:
-      - exec: $forwardProxy # 使用国际加密
+        exec: debug_print fallbackPrintResp
       - matches:
           - mark 1111
           - has_resp
@@ -195,12 +192,99 @@ plugins:
           - "!resp_ip ::/0"
         exec: query_summary _NOT_IPV6_MATCH_
 
+  # ================================ 缓存控制 ================================
+  - tag: "fallbackCacheSet"
+    type: "sequence"
+    args:
+      - matches: mark 1111
+        exec: query_summary TryCacheSet
+
+      - matches: has_wanted_ans
+        exec: cache 65535
       - matches:
-          - mark 8153 # 优先国内IP
-          - mark 2222 # ip地址查询
+          - mark 1111
           - has_wanted_ans
-          - "!resp_ip $ipDirect" # 应答是否是国内IP
-        exec: jump fallbackDrop
+        exec: query_summary fallbackCacheSet
+
+  - tag: "fallbackCacheGet"
+    type: "sequence"
+    args:
+      - matches: mark 1111
+        exec: query_summary TryCacheGet
+
+      - exec: cache 65535
+      - matches:
+          - mark 1111
+          - has_resp
+          - has_wanted_ans
+        exec: query_summary fallbackCacheGet
+
+  - tag: "fallbackCache"
+    type: "sequence"
+    args:
+      - matches: mark 655351
+        exec: jump fallbackCacheSet # 不能用goto代替jump，goto 进入调用链执行完后不会返回上一层
+      - matches: mark 655351
+        exec: return
+
+      - matches: mark 655350
+        exec: jump fallbackCacheGet
+      - matches: mark 655350
+        exec: return
+
+  # 实际执行cache写入的操作，目前是不提供指令来自主控制的
+  # 依旧实现cache写入的过程是为了方便调试运行逻辑
+  - tag: "fallbackCachePush"
+    type: "sequence"
+    args:
+      - matches: mark 2222 # ip地址查询
+        exec: mark 655351 # 标记写入cache
+      - matches: mark 2222
+        exec: jump fallbackCache
+
+  - tag: "fallbackCachePull"
+    type: "sequence"
+    args:
+      - matches: mark 2222 # ip地址查询
+        exec: mark 655350 # 标记获取cache
+      - matches: mark 2222
+        exec: jump fallbackCache
+
+  - tag: "fallbackTryCachePush"
+    type: "sequence"
+    args:
+      - exec: jump fallbackCheckResp
+      - matches: has_wanted_ans
+        exec: jump fallbackCachePush # 尝试将查询应答IP推入cache
+
+  # ================================ 请求处理 ================================
+  - tag: "fallbackDirect"
+    type: "sequence"
+    args:
+      - exec: $forwardDirect # 使用国内DOH
+      - matches:
+          - mark 1111
+          - has_resp
+        exec: jump fallbackPrintResp
+
+  - tag: "fallbackProxy"
+    type: "sequence"
+    args:
+      - exec: $forwardProxy # 使用国际加密
+      - matches:
+          - mark 1111
+          - has_resp
+        exec: jump fallbackPrintResp
+      - exec: jump fallbackTryDrop
+
+  - tag: "fallbackBackup"
+    type: "sequence"
+    args:
+      - exec: $forwardBackup # 使用国际DOH
+      - matches:
+          - mark 1111
+          - has_resp
+        exec: jump fallbackPrintResp
 
   - tag: "fallbackTryProxy"
     type: "sequence"
@@ -217,39 +301,9 @@ plugins:
     args:
       - matches: mark 1111
         exec: query_summary fallbackTryBackup
-      - exec: $forwardBackup # 使用国际DOH
+      - exec: jump fallbackBackup
 
-  - tag: "fallbackFilterIpResp"
-    type: "sequence"
-    args:
-      - matches:
-          - mark 1111
-          - has_resp
-        exec: debug_print fallbackFilterIpResp
-
-      - matches:
-          - "!mark 2222" # 非IP地址查询
-          - has_resp # 且有应答，例如 CNAME 应答
-        exec: accept
-
-  - tag: "fallbackCheckResp"
-    type: "sequence"
-    args:
-      - exec: jump fallbackFilterIpResp
-      - matches:
-          - mark 2222 # ip地址查询
-          - has_resp # 且有应答
-          - "!has_wanted_ans" # 且没有期望值，比如没有AAAA记录而返回SOA记录
-          - "!cname regexp:\\S+" # 且没有匹配任何CNAME
-        exec: reject 4 # 提前结束，不然查询客户端会等待至超时才应答
-
-  - tag: "fallbackTryCachePush"
-    type: "sequence"
-    args:
-      - exec: jump fallbackCheckResp
-      - matches: has_wanted_ans
-        exec: jump fallbackCachePush # 尝试将查询应答IP推入cache
-
+  # ================================ 回落进程 ================================
   - tag: "fallbackPrimary"
     type: "sequence"
     args:
@@ -257,17 +311,27 @@ plugins:
       - matches: mark 1111
         exec: query_summary fallbackPrimary
 
+      # 缓存由于不可自主控制写入，所以缓存的应答可能不是期望的应答
+      # 比如查询 AAAA 却应答了 CNAME 或者 SOA，没有目标ip也会被系统自动缓存
       - exec: jump fallbackCachePull # 先尝试拉取cache
-      - matches: has_resp
+      - matches:
+          - mark 2200 # 启用了非期望应答的缓存加速
+          - has_resp # 有应答，可能是非期望的应答缓存
+        exec: accept
+      - matches:
+          - "!mark 2200" # 没有启用非预期应答的cache加速，则非预期的应答都已被 drop_resp
+          - has_wanted_ans # 必须要有期望的值，
         exec: accept
 
       - exec: jump fallbackTryProxy #没有cache 再代理查询
       - exec: jump fallbackTryCachePush
       - matches: has_wanted_ans
-        exec: return
+        exec: accept
 
       - exec: jump fallbackTryBackup # 仍旧没有则执行备用方案
       - exec: jump fallbackTryCachePush
+      - matches: has_wanted_ans
+        exec: accept
 
   - tag: "fallbackSecondary"
     type: "sequence"
@@ -285,7 +349,7 @@ plugins:
       threshold: 700
       always_standby: false
 
-  # 处理过程
+  # ================================ 处理进程 ================================
   - tag: "processDirect"
     type: "sequence"
     args:
@@ -320,12 +384,25 @@ plugins:
       - matches: mark 1111
         exec: query_summary ------------ # 方便调试时分辨查询的起始位置
 
+      # 非预期应答毕竟是少数情况，当前暂时启用非预期应答的cache加速
+      # 如果注释此标记，则会丢弃非期望应答，适合要求实时结果的查询
+      - exec: mark 2200 # 2200 标记不丢弃非期望应答，从而使用cache加速
+
       # 2222 标记当前是 A/AAAA 这样的IP地址查询
       # 4444/6666 分别标记 ipv4/ipv6 查询
       - matches: qtype 1
         exec: mark 2222 4444
       - matches: qtype 28
         exec: mark 2222 6666
+
+      # 1010 标记用来直接调试某个域名，发布时需要注释
+      #- exec: mark 1010
+      - matches:
+          - mark 1010
+          - qname github.com # 修改为具体域名
+        exec: jump fallbackPrimary
+      - matches: mark 1010
+        exec: return
 
       # 优先阻止广告查询
       - matches: qname $domainReject
@@ -343,7 +420,7 @@ plugins:
       - exec: mark 2333
       - exec: $fallbackEntry
 
-  # 服务入口
+  # ================================ 服务入口 ================================
   - tag: "serverEntry"
     type: "udp_server"
     args:
