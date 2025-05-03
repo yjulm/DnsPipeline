@@ -1,5 +1,11 @@
 # DNS协议细节再此处 https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml
 
+# 指令说明：
+# accept reject 会让整个查询流程在指令处中断而直接返回整个查询
+# goto 进入一个序列任务执行完所有序列规则后，不会返回到跳转前的上一层，需要返回上一层需要 jump 替代
+# return 可在当前位置跨过剩余序列规则，而直接返回上一层继续执行。
+# 一般 jump 搭配 return 使用，可自由控制上下层的跳转返回
+
 log:
   level: info # 日志级别。可选 "debug" "info" "warn" "error"。默认 "info"。
   production: false
@@ -39,6 +45,9 @@ plugins:
   - tag: "ipDirect"
     type: "ip_set"
     args:
+      ips:
+        - 0.0.0.0/32
+        - ::/128
       files:
         - "../rule_data/geoip/text/cn.txt"
 
@@ -62,9 +71,20 @@ plugins:
         addr: "udp://127.0.0.1:8353"
 
   # 回落查询
+  - tag: "fallbackCheckDrop" # 用作避让 fallback 触发
+    type: "sequence"
+    args:
+      - matches:
+          - mark 5555
+        exec: reject
+
   - tag: "fallbackDrop"
     type: "sequence"
     args:
+      # wiki 文档描述 drop_resp 用于触发 fallback 流程，经目前测试没有自动执行 fallback 流程
+      # 为了预防后期的指令变化，在此下方实施 5555 标记的主动避让操作
+      # 5555 标记当前主动放弃应答，用于在 fallback 中在检测 5555 从而避免递归触发 fallback
+      - exec: mark 5555
       - exec: drop_resp
       - matches: mark 1111
         exec: query_summary fallbackDrop
@@ -98,7 +118,7 @@ plugins:
     type: "sequence"
     args:
       - matches: mark 655351
-        exec: jump fallbackCacheSet
+        exec: jump fallbackCacheSet # 不能用goto代替jump，goto 进入调用链执行完后不会返回上一层
       - matches: mark 655351
         exec: return
 
@@ -107,10 +127,12 @@ plugins:
       - matches: mark 655350
         exec: return
 
+  # 实际执行cache写入的操作，目前是不提供指令来自主控制的
+  # 依旧实现cache写入的过程是为了方便调试运行逻辑
   - tag: "fallbackCachePush"
     type: "sequence"
     args:
-      - matches: mark 2222 # 仅针对ip地址查询
+      - matches: mark 2222 # ip地址查询
         exec: mark 655351 # 标记写入cache
       - matches: mark 2222
         exec: jump fallbackCache
@@ -118,7 +140,7 @@ plugins:
   - tag: "fallbackCachePull"
     type: "sequence"
     args:
-      - matches: mark 2222 # 仅针对ip地址查询
+      - matches: mark 2222 # ip地址查询
         exec: mark 655350 # 标记获取cache
       - matches: mark 2222
         exec: jump fallbackCache
@@ -133,8 +155,49 @@ plugins:
     args:
       - exec: $forwardProxy # 使用国际加密
       - matches:
+          - mark 1111
+          - has_resp
+        exec: query_summary _HAS_RESP_OK_
+      - matches:
+          - mark 1111
+          - has_wanted_ans
+        exec: query_summary _HAS_WANTED_ANS_OK_
+      - matches:
+          - mark 1111
+          - cname regexp:\S+
+        exec: query_summary _CNAME_REGEXP_MATCH_
+      - matches:
+          - mark 1111
+          - "!cname regexp:\\S+"
+        exec: query_summary _CNAME_NOT_MATCH_
+      - matches:
+          - mark 1111
+          - "resp_ip 0.0.0.0/32"
+        exec: query_summary _ZERO_IPV4_MATCH_
+      - matches:
+          - mark 1111
+          - "resp_ip ::/128"
+        exec: query_summary _ZERO_IPV6_MATCH_
+      - matches:
+          - mark 1111
+          - "resp_ip 0.0.0.0/0"
+        exec: query_summary _ANY_IPV4_MATCH_
+      - matches:
+          - mark 1111
+          - "resp_ip ::/0"
+        exec: query_summary _ANY_IPV6_MATCH_
+      - matches:
+          - mark 1111
+          - "!resp_ip 0.0.0.0/0"
+        exec: query_summary _NOT_IPV4_MATCH_
+      - matches:
+          - mark 1111
+          - "!resp_ip ::/0"
+        exec: query_summary _NOT_IPV6_MATCH_
+
+      - matches:
           - mark 8153 # 优先国内IP
-          - mark 2222 # 仅针对ip地址查询
+          - mark 2222 # ip地址查询
           - has_wanted_ans
           - "!resp_ip $ipDirect" # 应答是否是国内IP
         exec: jump fallbackDrop
@@ -156,17 +219,41 @@ plugins:
         exec: query_summary fallbackTryBackup
       - exec: $forwardBackup # 使用国际DOH
 
-  - tag: "fallbackCheckQuery"
+  - tag: "fallbackFilterIpResp"
     type: "sequence"
     args:
+      - matches:
+          - mark 1111
+          - has_resp
+        exec: debug_print fallbackFilterIpResp
+
       - matches:
           - "!mark 2222" # 非IP地址查询
           - has_resp # 且有应答，例如 CNAME 应答
         exec: accept
 
+  - tag: "fallbackCheckResp"
+    type: "sequence"
+    args:
+      - exec: jump fallbackFilterIpResp
+      - matches:
+          - mark 2222 # ip地址查询
+          - has_resp # 且有应答
+          - "!has_wanted_ans" # 且没有期望值，比如没有AAAA记录而返回SOA记录
+          - "!cname regexp:\\S+" # 且没有匹配任何CNAME
+        exec: reject 4 # 提前结束，不然查询客户端会等待至超时才应答
+
+  - tag: "fallbackTryCachePush"
+    type: "sequence"
+    args:
+      - exec: jump fallbackCheckResp
+      - matches: has_wanted_ans
+        exec: jump fallbackCachePush # 尝试将查询应答IP推入cache
+
   - tag: "fallbackPrimary"
     type: "sequence"
     args:
+      - exec: jump fallbackCheckDrop
       - matches: mark 1111
         exec: query_summary fallbackPrimary
 
@@ -175,24 +262,17 @@ plugins:
         exec: accept
 
       - exec: jump fallbackTryProxy #没有cache 再代理查询
-      - exec: jump fallbackCheckQuery
+      - exec: jump fallbackTryCachePush
+      - matches: has_wanted_ans
+        exec: return
 
-      # 实际执行cache写入的操作，目前是不提供自主控制的
-      # 依旧实现cache写入的过程是为了方便调试运行逻辑
-      - matches: has_wanted_ans
-        exec: jump fallbackCachePush # 尝试将上方的代理查询应答IP推入cache
-      - matches: has_wanted_ans
-        exec: accept
-
-      # 代理查询没有期望的应答则执行备用方案
-      - exec: jump fallbackTryBackup
-      - exec: jump fallbackCheckQuery
-      - matches: has_wanted_ans
-        exec: jump fallbackCachePush # 尝试将上方的备用方案应答IP推入cache
+      - exec: jump fallbackTryBackup # 仍旧没有则执行备用方案
+      - exec: jump fallbackTryCachePush
 
   - tag: "fallbackSecondary"
     type: "sequence"
     args:
+      - exec: jump fallbackCheckDrop
       - matches: mark 1111
         exec: query_summary fallbackSecondary
       - exec: jump fallbackDirect
@@ -230,7 +310,10 @@ plugins:
   - tag: "processEntry"
     type: "sequence"
     args:
-      - exec: prefer_ipv4 # ipv4 优先
+      # prefer_ipv4 将会在 AAAA 查询中启动两个线程同时进行 AAAA 和 A 的查询，并优先返回 A 记录。
+      # 拿到 A 应答后，会杀死原先的 AAAA 线程，并在 log 中表现出 error: context deadline exceeded
+      # 此时 has_wanted_ans 需要考虑 AAAA 和 A 这两次操作
+      #- exec: prefer_ipv4 # ipv4 优先
 
       # 1111 标记用来控制 log 启用状态，注释下方行则禁用 log
       - exec: mark 1111
@@ -261,7 +344,7 @@ plugins:
       - exec: $fallbackEntry
 
   # 服务入口
-  - tag: ""
+  - tag: "serverEntry"
     type: "udp_server"
     args:
       entry: "processEntry"
