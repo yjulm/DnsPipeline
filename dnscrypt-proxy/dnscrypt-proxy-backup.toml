@@ -1,7 +1,7 @@
 
 server_names = ['rethink-doh', 'cloudflare-doh']
 listen_addresses = ['127.0.0.1:8353', '[::1]:8353', '0.0.0.0:8353', '[::]:8353']
-timeout = 600
+timeout = 5000
 keepalive = 30
 lb_strategy = 'first'
 lb_estimator = true
