@@ -95,8 +95,9 @@ plugins:
       - matches:
           - mark 8153 # 优先国内IP
           - mark 2222 # ip地址查询
+          - has_resp
           - has_wanted_ans
-          - "!resp_ip $ipDirect" # 应答是否是国内IP
+          - "!resp_ip $ipDirect" # 应答IP不是国内IP
         exec: jump fallbackDrop
 
   - tag: "fallbackFilterIpResp"
@@ -199,11 +200,11 @@ plugins:
       - matches: mark 1111
         exec: query_summary TryCacheSet
 
-      - matches: has_wanted_ans
+      - matches: has_resp
         exec: cache 65535
       - matches:
           - mark 1111
-          - has_wanted_ans
+          - has_resp
         exec: query_summary fallbackCacheSet
 
   - tag: "fallbackCacheGet"
@@ -216,9 +217,9 @@ plugins:
       - matches:
           - mark 1111
           - has_resp
-          - has_wanted_ans
         exec: query_summary fallbackCacheGet
 
+  # 由于每个域名都会先尝试获取缓存而被标记 655350，所以 655351 的检测必须排在前面
   - tag: "fallbackCache"
     type: "sequence"
     args:
@@ -233,7 +234,7 @@ plugins:
         exec: return
 
   # 实际执行cache写入的操作，目前是不提供指令来自主控制的
-  # 依旧实现cache写入的过程是为了方便调试运行逻辑
+  # 依旧实现cache写入的过程，是为了方便调试运行逻辑
   - tag: "fallbackCachePush"
     type: "sequence"
     args:
@@ -254,8 +255,29 @@ plugins:
     type: "sequence"
     args:
       - exec: jump fallbackCheckResp
-      - matches: has_wanted_ans
+      - matches:
+          - mark 2200 # 启用了非期望应答的缓存加速
+          - has_resp # 有应答，可能是非期望的应答缓存
+        exec: jump fallbackCachePush
+      - matches:
+          - "!mark 2200" # 没有启用非预期应答的cache加速，则非预期的应答都已被 drop_resp
+          - has_resp # 必须要有应答，因为正常的应答不会被 drop_resp
+          - has_wanted_ans # 必须要有期望的值
         exec: jump fallbackCachePush # 尝试将查询应答IP推入cache
+
+  - tag: "fallbackTryCachePull"
+    type: "sequence"
+    args:
+      - exec: jump fallbackCachePull # 先尝试拉取cache
+      - matches:
+          - mark 2200 # 启用了非期望应答的缓存加速
+          - has_resp # 有应答，可能是非期望的应答缓存
+        exec: mark 2201 # 标记通过了取缓存的检测要求
+      - matches:
+          - "!mark 2200" # 没有启用非预期应答的cache加速，则非预期的应答都已被 drop_resp
+          - has_resp # 必须要有应答，因为正常的应答不会被 drop_resp
+          - has_wanted_ans # 必须要有期望的值
+        exec: mark 2201 # 标记通过了取缓存的检测要求
 
   # ================================ 请求处理 ================================
   - tag: "fallbackDirect"
@@ -313,25 +335,18 @@ plugins:
 
       # 缓存由于不可自主控制写入，所以缓存的应答可能不是期望的应答
       # 比如查询 AAAA 却应答了 CNAME 或者 SOA，没有目标ip也会被系统自动缓存
-      - exec: jump fallbackCachePull # 先尝试拉取cache
-      - matches:
-          - mark 2200 # 启用了非期望应答的缓存加速
-          - has_resp # 有应答，可能是非期望的应答缓存
-        exec: accept
-      - matches:
-          - "!mark 2200" # 没有启用非预期应答的cache加速，则非预期的应答都已被 drop_resp
-          - has_wanted_ans # 必须要有期望的值，
+      - exec: jump fallbackTryCachePull # 先尝试拉取cache
+      - matches: mark 2201 # 通过了取缓存的检测要求
         exec: accept
 
       - exec: jump fallbackTryProxy #没有cache 再代理查询
-      - exec: jump fallbackTryCachePush
+      - matches: has_wanted_ans
+        exec: jump fallbackTryCachePush
       - matches: has_wanted_ans
         exec: accept
 
       - exec: jump fallbackTryBackup # 仍旧没有则执行备用方案
       - exec: jump fallbackTryCachePush
-      - matches: has_wanted_ans
-        exec: accept
 
   - tag: "fallbackSecondary"
     type: "sequence"
