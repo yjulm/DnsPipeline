@@ -108,7 +108,7 @@ filters:
     name: AdGuardHomeRules
     id: 1745160411
   - enabled: true
-    url: https://phishing-filter.pages.dev/phishing-filter-agh.txt
+    url: https://malware-filter.gitlab.io/phishing-filter/phishing-filter-agh.txt
     name: Phishing URL Blocklist (AdGuard Home)
     id: 1745160412
   - enabled: true
@@ -120,7 +120,7 @@ filters:
     name: Dan Pollock’s hosts file
     id: 1745160414
   - enabled: true
-    url: https://urlhaus-filter.pages.dev/urlhaus-filter-agh-online.txt
+    url: https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-agh-online.txt
     name: Online Malicious URL Blocklist (AdGuard Home)
     id: 1745160415
   - enabled: true
