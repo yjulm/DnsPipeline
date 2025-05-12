@@ -42,14 +42,37 @@ plugins:
         - "../rule_data/domain-list-custom/category-ads-all.txt"
         - "../rule_data/domain-list-custom/private.txt"
 
-  - tag: "ipDirect"
+  - tag: "ipPrivate"
     type: "ip_set"
     args:
       ips:
         - 0.0.0.0/32
         - ::/128
+
+  - tag: "ipDirect"
+    type: "ip_set"
+    args:
       files:
         - "../rule_data/geoip/text/cn.txt"
+
+  - tag: "ipSurround"
+    type: "ip_set"
+    args:
+      files:
+        - "../rule_data/geoip/text/tw.txt"
+        - "../rule_data/geoip/text/hk.txt"
+        - "../rule_data/geoip/text/kr.txt"
+        - "../rule_data/geoip/text/jp.txt"
+        - "../rule_data/geoip/text/my.txt"
+        - "../rule_data/geoip/text/sg.txt"
+
+  - tag: "ipCDN"
+    type: "ip_set"
+    args:
+      files:
+        - "../rule_data/geoip/text/cloudflare.txt"
+        - "../rule_data/geoip/text/cloudfront.txt"
+        - "../rule_data/geoip/text/fastly.txt"
 
   # ================================ 转发设置 ================================
   - tag: "forwardDirect"
@@ -89,6 +112,36 @@ plugins:
       - matches: mark 1111
         exec: query_summary fallbackDrop
 
+  - tag: "fallbackFilterIp"
+    type: "sequence"
+    args:
+      - exec: mark 815300 # 执行了IP检测
+      - matches:
+          - "!mark 815399" # 还没有成功匹配IP
+          - resp_ip $ipCDN # 应答IP在CDN
+        exec: mark 815399 815301 # 815301 标记CDN IP
+      - matches:
+          - "!mark 815399"
+          - resp_ip $ipDirect # 应答IP在国内
+        exec: mark 815399 815302 # 815302 标记国内IP
+      - matches:
+          - "!mark 815399"
+          - resp_ip $ipSurround # 应答IP在环大陆
+        exec: mark 815399 815303 # 815303 标记环大陆IP
+
+      - matches:
+          - mark 1111
+          - mark 815301
+        exec: query_summary FilterIpCDN
+      - matches:
+          - mark 1111
+          - mark 815302
+        exec: query_summary FilterIpDirect
+      - matches:
+          - mark 1111
+          - mark 815303
+        exec: query_summary FilterIpSurround
+
   - tag: "fallbackTryDrop"
     type: "sequence"
     args:
@@ -97,10 +150,14 @@ plugins:
           - mark 2222 # ip地址查询
           - has_resp
           - has_wanted_ans
-          - "!resp_ip $ipDirect" # 应答IP不是国内IP
+        exec: jump fallbackFilterIp
+
+      - matches:
+          - mark 815300 # 执行了IP检测
+          - "!mark 815399" # 但没有成功匹配IP
         exec: jump fallbackDrop
 
-  - tag: "fallbackFilterIpResp"
+  - tag: "fallbackFilterResp"
     type: "sequence"
     args:
       - matches:
@@ -111,7 +168,7 @@ plugins:
   - tag: "fallbackCheckResp"
     type: "sequence"
     args:
-      - exec: jump fallbackFilterIpResp
+      - exec: jump fallbackFilterResp
 
       - matches:
           - mark 2222 # ip地址查询
@@ -286,6 +343,7 @@ plugins:
       - exec: $forwardDirect # 使用国内DOH
       - matches:
           - mark 1111
+          - mark 22221 # 启用应答状态打印
           - has_resp
         exec: jump fallbackPrintResp
 
@@ -295,9 +353,9 @@ plugins:
       - exec: $forwardProxy # 使用国际加密
       - matches:
           - mark 1111
+          - mark 22221 # 启用应答状态打印
           - has_resp
         exec: jump fallbackPrintResp
-      - exec: jump fallbackTryDrop
 
   - tag: "fallbackBackup"
     type: "sequence"
@@ -305,6 +363,7 @@ plugins:
       - exec: $forwardBackup # 使用国际DOH
       - matches:
           - mark 1111
+          - mark 22221 # 启用应答状态打印
           - has_resp
         exec: jump fallbackPrintResp
 
@@ -313,10 +372,8 @@ plugins:
     args:
       - matches: mark 1111
         exec: query_summary fallbackTryProxy
-
-      - matches: mark 2333 # 查询不在所有规则中
-        exec: mark 8153 # 8153标记操作应当优先获取国内IP
       - exec: jump fallbackProxy
+      - exec: jump fallbackTryDrop
 
   - tag: "fallbackTryBackup"
     type: "sequence"
@@ -410,6 +467,9 @@ plugins:
       - matches: qtype 28
         exec: mark 2222 6666
 
+      # 22221 标记用作控制ip查询的应答状态打印，注释则禁用打印
+      #- exec: mark 22221
+
       # 1010 标记用来直接调试某个域名，发布时需要注释
       #- exec: mark 1010
       - matches:
@@ -431,8 +491,8 @@ plugins:
       - matches: qname $domainProxy
         exec: goto processProxy
 
-      # 2333 标记不在规则中的查询，则优先国内IP
-      - exec: mark 2333
+      # 8153 标记不在规则中的查询，则优先国内IP
+      - exec: mark 8153
       - exec: $fallbackEntry
 
   # ================================ 服务入口 ================================
