@@ -15,32 +15,36 @@ plugins:
   - tag: "domainDirect"
     type: "domain_set"
     args:
+      exps:
+        - "regexp:\\S+\\.cn$"
+        - "regexp:\\S+\\.cn\\.\\S+"
+        - "regexp:^(?:cn|cdn|lib|libs|code|mirror|mirrors)\\.\\S+"
+        - "regexp:^(?:\\b[^\\.]+cdn|cdn[^\\.]+\\b|\\b[^\\.]+cdn[^\\.]+\\b)\\.\\S+"
       files:
-        - "../rule_data/v2ray-rules-dat/direct-list.txt"
-        - "../rule_data/v2ray-rules-dat/china-list.txt"
-        - "../rule_data/v2ray-rules-dat/apple-cn.txt"
+        - "../rule_data/domain-list-custom/tld-cn.txt" # 域名后缀
+        - "../rule_data/v2ray-rules-dat/apple-cn.txt" # 常见活跃域名
         - "../rule_data/v2ray-rules-dat/google-cn.txt"
+        - "../rule_data/domain-list-custom/geolocation-cn.txt" # 通用性大批量域名
         - "../rule_data/domain-list-custom/cn.txt"
-        - "../rule_data/domain-list-custom/geolocation-cn.txt"
-        - "../rule_data/domain-list-custom/tld-cn.txt"
+        - "../rule_data/v2ray-rules-dat/direct-list.txt"
 
   - tag: "domainProxy"
     type: "domain_set"
     args:
       files:
-        - "../rule_data/v2ray-rules-dat/proxy-list.txt"
-        - "../rule_data/v2ray-rules-dat/gfw.txt"
+        - "../rule_data/domain-list-custom/tld-!cn.txt" # 域名后缀
+        - "../rule_data/domain-list-custom/geolocation-!cn.txt" # 常见域名
+        - "../rule_data/v2ray-rules-dat/gfw.txt" # 通用性大批量域名
         - "../rule_data/v2ray-rules-dat/greatfire.txt"
-        - "../rule_data/domain-list-custom/geolocation-!cn.txt"
-        - "../rule_data/domain-list-custom/tld-!cn.txt"
+        - "../rule_data/v2ray-rules-dat/proxy-list.txt"
 
   - tag: "domainReject"
     type: "domain_set"
     args:
       files:
-        - "../rule_data/v2ray-rules-dat/reject-list.txt"
-        - "../rule_data/domain-list-custom/category-ads-all.txt"
-        - "../rule_data/domain-list-custom/private.txt"
+        - "../rule_data/domain-list-custom/private.txt" # 私有或本地域名
+        - "../rule_data/domain-list-custom/category-ads-all.txt" # 广告域名合集
+        - "../rule_data/v2ray-rules-dat/reject-list.txt" # 通用性大批量域名
 
   - tag: "ipPrivate"
     type: "ip_set"
@@ -483,13 +487,13 @@ plugins:
       - matches: qname $domainReject
         exec: goto processReject
 
-      # 直接国内查询
-      - matches: qname $domainDirect
-        exec: goto processDirect
-
-      # 直接国际查询
+      # 先匹配国际域名，避免规则误判某些国际域名为国内域名
       - matches: qname $domainProxy
         exec: goto processProxy
+
+      # 再匹配国内域名
+      - matches: qname $domainDirect
+        exec: goto processDirect
 
       # 8153 标记不在规则中的查询，则优先国内IP
       - exec: mark 8153
