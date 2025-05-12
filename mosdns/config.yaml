@@ -145,8 +145,12 @@ plugins:
           - mark 1111
           - mark 815303
         exec: query_summary FilterIpSurround
+      - matches:
+          - mark 1111
+          - "!mark 815399" # 没有匹配任何ip规则
+        exec: query_summary FilterIpFailure
 
-  - tag: "fallbackTryDrop"
+  - tag: "fallbackTryFilterIp"
     type: "sequence"
     args:
       - matches:
@@ -155,25 +159,22 @@ plugins:
           - has_resp
           - has_wanted_ans
         exec: jump fallbackFilterIp
-
       - matches:
           - mark 815300 # 执行了IP检测
           - "!mark 815399" # 但没有成功匹配IP
         exec: jump fallbackDrop
+      - matches: mark 815300
+        exec: return
 
-  - tag: "fallbackFilterResp"
-    type: "sequence"
-    args:
       - matches:
-          - "!mark 2222" # 非IP地址查询
-          - has_resp # 且有应答，例如 CNAME 应答
-        exec: accept
+          - mark 2222 # ip地址查询
+          - has_resp # 且有应答
+          - "!has_wanted_ans" # 但没有期望值，可能是CNAME或者SOA记录
+        exec: jump fallbackDrop
 
   - tag: "fallbackCheckResp"
     type: "sequence"
     args:
-      - exec: jump fallbackFilterResp
-
       - matches:
           - mark 2222 # ip地址查询
           - has_resp # 且有应答
@@ -253,6 +254,19 @@ plugins:
           - mark 1111
           - "!resp_ip ::/0"
         exec: query_summary _NOT_IPV6_MATCH_
+
+  - tag: "fallbackFilterResp"
+    type: "sequence"
+    args:
+      - matches:
+          - mark 1111
+          - mark 22221 # 启用应答状态打印
+          - has_resp
+        exec: jump fallbackPrintResp
+      - matches:
+          - "!mark 2222" # 非IP地址查询
+          - has_resp # 且有应答，例如 CNAME 应答
+        exec: accept
 
   # ================================ 缓存控制 ================================
   - tag: "fallbackCacheSet"
@@ -345,31 +359,19 @@ plugins:
     type: "sequence"
     args:
       - exec: $forwardDirect # 使用国内DOH
-      - matches:
-          - mark 1111
-          - mark 22221 # 启用应答状态打印
-          - has_resp
-        exec: jump fallbackPrintResp
+      - exec: jump fallbackFilterResp
 
   - tag: "fallbackProxy"
     type: "sequence"
     args:
       - exec: $forwardProxy # 使用国际加密
-      - matches:
-          - mark 1111
-          - mark 22221 # 启用应答状态打印
-          - has_resp
-        exec: jump fallbackPrintResp
+      - exec: jump fallbackFilterResp
 
   - tag: "fallbackBackup"
     type: "sequence"
     args:
       - exec: $forwardBackup # 使用国际DOH
-      - matches:
-          - mark 1111
-          - mark 22221 # 启用应答状态打印
-          - has_resp
-        exec: jump fallbackPrintResp
+      - exec: jump fallbackFilterResp
 
   - tag: "fallbackTryProxy"
     type: "sequence"
@@ -377,7 +379,7 @@ plugins:
       - matches: mark 1111
         exec: query_summary fallbackTryProxy
       - exec: jump fallbackProxy
-      - exec: jump fallbackTryDrop
+      - exec: jump fallbackTryFilterIp
 
   - tag: "fallbackTryBackup"
     type: "sequence"
@@ -400,6 +402,8 @@ plugins:
       - matches: mark 2201 # 通过了取缓存的检测要求
         exec: accept
 
+      # 这是查询的第一次，如果ip查询请求没有应答ip则会被丢弃，
+      # 同时如果查询来自规则外，则还会执行ip优选，也可能被丢弃。
       - exec: jump fallbackTryProxy #没有cache 再代理查询
       - matches: has_wanted_ans
         exec: jump fallbackTryCachePush
@@ -422,7 +426,7 @@ plugins:
     args:
       primary: fallbackPrimary
       secondary: fallbackSecondary
-      threshold: 700
+      threshold: 2000
       always_standby: false
 
   # ================================ 处理进程 ================================
