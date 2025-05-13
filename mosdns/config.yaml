@@ -12,7 +12,7 @@ log:
 
 plugins:
   # ================================ 规则导入 ================================
-  - tag: "domainDirect"
+  - tag: "domainRegexDirect"
     type: "domain_set"
     args:
       exps:
@@ -20,6 +20,10 @@ plugins:
         - "regexp:\\S+\\.cn\\.\\S+"
         - "regexp:^(?:cn|cdn|lib|libs|code|mirror|mirrors)\\.\\S+"
         - "regexp:^(?:\\b[^\\.]+cdn|cdn[^\\.]+\\b|\\b[^\\.]+cdn[^\\.]+\\b)\\.\\S+"
+
+  - tag: "domainDirect"
+    type: "domain_set"
+    args:
       files:
         - "../rule_data/domain-list-custom/tld-cn.txt" # 域名后缀
         - "../rule_data/v2ray-rules-dat/apple-cn.txt" # 常见活跃域名
@@ -451,7 +455,7 @@ plugins:
         exec: query_summary processReject
       - exec: reject 3
 
-  - tag: "processEntry"
+  - tag: "processSetting"
     type: "sequence"
     args:
       # prefer_ipv4 将会在 AAAA 查询中启动两个线程同时进行 AAAA 和 A 的查询，并优先返回 A 记录。
@@ -461,8 +465,6 @@ plugins:
 
       # 1111 标记用来控制 log 启用状态，注释下方行则禁用 log
       - exec: mark 1111
-      - matches: mark 1111
-        exec: query_summary ------------ # 方便调试时分辨查询的起始位置
 
       # 非预期应答毕竟是少数情况，当前暂时启用非预期应答的cache加速
       # 如果注释此标记，则会丢弃非期望应答，适合要求实时结果的查询
@@ -480,25 +482,73 @@ plugins:
 
       # 1010 标记用来直接调试某个域名，发布时需要注释
       #- exec: mark 1010
+
+  - tag: "processDebugDomain"
+    type: "sequence"
+    args:
       - matches:
-          - mark 1010
+          - mark 1010 # 直接调试域名模式
           - qname github.com # 修改为具体域名
         exec: jump fallbackPrimary
       - matches: mark 1010
-        exec: return
+        exec: accept
+
+  - tag: "processMatchDomain"
+    type: "sequence"
+    args:
+      - matches: mark 1111
+        exec: query_summary ------------ # 方便调试时分辨查询的起始位置
 
       # 优先阻止广告查询
       - matches: qname $domainReject
         exec: goto processReject
 
-      # 先匹配国际域名，避免规则误判某些国际域名为国内域名
+      - matches: qname $domainDirect
+        exec: mark 99100 # 标记匹配国内域名
+      - matches: qname $domainRegexDirect
+        exec: mark 99101 # 标记匹配通用正则表达式
       - matches: qname $domainProxy
+        exec: mark 99200 # 标记匹配国际域名
+
+      - matches:
+          - mark 1111
+          - mark 99100
+        exec: query_summary _DIRECT_MATCH_
+      - matches:
+          - mark 1111
+          - mark 99101
+        exec: query_summary _REGEX_DIRECT_MATCH_
+      - matches:
+          - mark 1111
+          - mark 99200
+        exec: query_summary _PROXY_MATCH_
+
+  - tag: "processEntry"
+    type: "sequence"
+    args:
+      - exec: jump processSetting
+      - exec: jump processDebugDomain
+      - exec: jump processMatchDomain
+
+      # 既匹配国际域名也匹配国内域名，可能某些国外web静态资源加速域名在国内有CDN
+      - matches:
+          - mark 99200
+          - mark 99100
+        exec: goto processDirect
+
+      # 先匹配国际域名
+      - matches: mark 99200
         exec: goto processProxy
 
       # 再匹配国内域名
-      - matches: qname $domainDirect
+      - matches: mark 99100
         exec: goto processDirect
 
+      # 再通用正则表达式
+      - matches: mark 99101
+        exec: goto processDirect
+
+      # 所有规则都不命中，则启用ip优选模式
       # 8153 标记不在规则中的查询，则优先国内IP
       - exec: mark 8153
       - exec: $fallbackEntry
