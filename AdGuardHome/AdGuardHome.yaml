@@ -28,20 +28,22 @@ dns:
   upstream_mode: load_balance
   fastest_timeout: 1s
   allowed_clients:
-    - 0.0.0.0
     - 127.0.0.1
     - 10.0.0.0/8
     - 172.16.0.0/12
+    - 169.254.0.0/16
     - 192.168.0.0/16
-    - 224.0.0.0/16
-    - 239.255.0.0/16
-    - 255.255.0.0/16
+    - ::1
+    - fc00::/7
+    - fd00::/8
+    - fe80::/10
+    - fec0::/10
   disallowed_clients: []
   blocked_hosts: []
   trusted_proxies:
     - 127.0.0.0/8
     - ::1/128
-  cache_size: 4194304
+  cache_size: 0
   cache_ttl_min: 0
   cache_ttl_max: 0
   cache_optimistic: false
@@ -84,14 +86,20 @@ tls:
   strict_sni_check: false
 querylog:
   dir_path: ""
-  ignored: []
+  ignored:
+    - localhost
+    - in-addr.arpa
+    - ip6.arpa
   interval: 24h
   size_memory: 1000
   enabled: true
   file_enabled: true
 statistics:
   dir_path: ""
-  ignored: []
+  ignored:
+    - localhost
+    - in-addr.arpa
+    - ip6.arpa
   interval: 24h
   enabled: true
 filters:
@@ -119,7 +127,7 @@ filters:
     url: https://someonewhocares.org/hosts/hosts
     name: Dan Pollock’s hosts file
     id: 1745160414
-  - enabled: true
+  - enabled: false
     url: https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-agh-online.txt
     name: Online Malicious URL Blocklist (AdGuard Home)
     id: 1745160415
@@ -132,7 +140,8 @@ whitelist_filters:
     url: https://slink.ltd/https://raw.githubusercontent.com/BlueSkyXN/AdGuardHomeRules/master/ok.txt
     name: AdGuardHomeRules
     id: 1745160410
-user_rules: []
+user_rules:
+  - '||localhost^'
 dhcp:
   enabled: false
   interface_name: ""
