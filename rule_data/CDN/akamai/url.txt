@@ -1,0 +1,1 @@
+https://techdocs.akamai.com/origin-ip-acl/docs/update-your-origin-server
