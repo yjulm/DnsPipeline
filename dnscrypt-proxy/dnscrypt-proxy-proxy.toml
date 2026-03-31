@@ -26,6 +26,15 @@ stamp = 'sdns://AQEAAAAAAAAADDE0Ni4xMTIuNDEuNCC3NRFAIG8iXT4r2CLX_WkeocM8yNZmjQy-
 [static.'quad9-scrypt']
 stamp = 'sdns://AQYAAAAAAAAAEzE0OS4xMTIuMTEyLjEwOjg0NDMgZ8hHuMh1jNEgJFVDvnVnRt803x2EwAuMRwNo34Idhj4ZMi5kbnNjcnlwdC1jZXJ0LnF1YWQ5Lm5ldA'
 
+[static.'adguard-scrypt']
+stamp = 'sdns://AQIAAAAAAAAAFlsyYTEwOjUwYzA6OjE6ZmZdOjU0NDMgtehE1rg6Pj4SaOtoH76nDePF-mjb1ogUHb8uwGay2volMi5kbnNjcnlwdC51bmZpbHRlcmVkLm5zMS5hZGd1YXJkLmNvbQ'
+
+[static.'dnscry-pt-hk01']
+stamp = 'sdns://AQcAAAAAAAAACzk2LjkuMjI4LjI3ICMJK8RA3cOKDpDZjSR9PqVXj2mGf43CHMa6fO7ZzCWmGTIuZG5zY3J5cHQtY2VydC5kbnNjcnkucHQ'
+
+[static.'dnscry-pt-hk02']
+stamp = 'sdns://AQcAAAAAAAAADTE1MS4yNDIuNjQuMzYgEZrYKTn-fcsCzJyjjfhUxfw0xz6OC5AkLf4tvyQ2RGQZMi5kbnNjcnlwdC1jZXJ0LmRuc2NyeS5wdA'
+
 [static.'opendns-doh']
 stamp = 'sdns://AgYAAAAAAAAAAAAXZG9oLnNhbmRib3gub3BlbmRucy5jb20KL2Rucy1xdWVyeQ'
 
