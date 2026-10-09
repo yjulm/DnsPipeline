@@ -202,6 +202,10 @@ plugins:
         exec: query_summary _PRINT_CNAME_HAS_
       - matches: "!cname regexp:\\S+"
         exec: query_summary _PRINT_CNAME_NOT_
+
+  - tag: "printForwardRespIp"
+    type: "sequence"
+    args:
       - matches: "resp_ip 0.0.0.0/32"
         exec: query_summary _PRINT_ZERO_IPV4_
       - matches: "resp_ip ::/128"
@@ -236,6 +240,8 @@ plugins:
       - matches: mark 1111
         exec: query_summary cacheTryDirectGet
       - exec: cache 65535
+      - matches: has_resp
+        exec: mark 655350 # 标记读取cache
       - matches:
           - mark 1111
           - has_resp
@@ -246,17 +252,13 @@ plugins:
   - tag: "cacheTrySetResp"
     type: "sequence"
     args:
-      - matches:
-          - mark 2222 # ip地址查询
-          - mark 2299 # 启用了应答缓存功能
+      - matches: mark 2299 # 启用了应答缓存功能
         exec: jump cacheTryDirectSet
 
   - tag: "cacheTryGetResp"
     type: "sequence"
     args:
-      - matches:
-          - mark 2222 # ip地址查询
-          - mark 2299 # 启用了应答缓存功能
+      - matches: mark 2299 # 启用了应答缓存功能
         exec: jump cacheTryDirectGet
 
   # ================================ 应答处理 ================================
@@ -351,6 +353,8 @@ plugins:
       - matches: has_resp
         exec: debug_print fallbackPrintResp
       - exec: jump printForwardResp
+      - matches: mark 2222 # ip地址查询
+        exec: jump printForwardRespIp
 
   - tag: "fallbackFilterResp"
     type: "sequence"
@@ -374,34 +378,22 @@ plugins:
     args:
       - exec: jump fallbackCheckResp
       - matches:
+          - mark 2222 # ip地址查询
           - mark 2200 # 启用了非期望应答的缓存加速
           - has_resp # 有应答，可能是非期望的应答缓存
         exec: jump cacheTrySetResp
       - matches:
+          - mark 2222 # ip地址查询
           - "!mark 2200" # 没有启用非预期应答的cache加速，则非预期的应答都已被 drop_resp
           - has_resp # 必须要有应答，因为正常的应答不会被 drop_resp
           - has_wanted_ans # 必须要有期望的值
         exec: jump cacheTrySetResp # 尝试将查询应答IP推入cache
 
-      - matches: mark 655351 # 以写入cache
-        exec: accept
-
   - tag: "fallbackTryCachePull"
     type: "sequence"
     args:
-      - exec: jump cacheTryGetResp # 先尝试拉取cache
-      - matches:
-          - mark 2200 # 启用了非期望应答的缓存加速
-          - has_resp # 有应答，可能是非期望的应答缓存
-        exec: mark 655350 # 标记通过了取缓存的检测要求
-      - matches:
-          - "!mark 2200" # 没有启用非预期应答的cache加速，则非预期的应答都已被 drop_resp
-          - has_resp # 必须要有应答，因为正常的应答不会被 drop_resp
-          - has_wanted_ans # 必须要有期望的值
-        exec: mark 655350 # 标记通过了取缓存的检测要求
-
-      - matches: mark 655350
-        exec: accept
+      - matches: mark 2222 # ip地址查询
+        exec: jump cacheTryGetResp # 先尝试拉取cache
 
   # ================================ 请求处理 ================================
   - tag: "fallbackTryStandby"
@@ -542,11 +534,8 @@ plugins:
         exec: query_summary processTryCachePull
       # 缓存由于不可自主控制写入，所以缓存的应答可能不是期望的应答
       # 比如查询 AAAA 却应答了 CNAME 或者 SOA，没有目标ip也会被系统自动缓存
-      - matches: mark 2222 # ip地址查询
-        exec: jump fallbackTryCachePull # 先尝试拉取cache
-      - matches:
-          - has_resp
-          - resp_ip 0.0.0.0/32 ::/128 # 匹配拉取缓存中广告域名的黑洞地址
+      - exec: jump fallbackTryCachePull # 先尝试拉取cache
+      - matches: has_resp
         exec: accept
 
   - tag: "processMatchDomain"
