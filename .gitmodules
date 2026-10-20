@@ -9,7 +9,11 @@
 [submodule "rule_data/domain-list-community"]
 	path = rule_data/domain-list-community
 	url = https://github.com/v2fly/domain-list-community.git
+	branch = release
 [submodule "rule_data/geoip"]
 	path = rule_data/geoip
 	url = https://github.com/Loyalsoldier/geoip.git
 	branch = release
+[submodule "rule_data/GFWIP"]
+	path = rule_data/GFWIP
+	url = https://github.com/greatcoolge/GFWIP.git
