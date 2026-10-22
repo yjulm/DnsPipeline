@@ -104,11 +104,11 @@ statistics:
   enabled: true
 filters:
   - enabled: true
-    url: https://slink.ltd/https://raw.githubusercontent.com/damengzhu/banad/main/dnslist.txt
+    url: https://gcore.jsdelivr.net/gh/damengzhu/banad@main/dnslist.txt
     name: 轻量广告拦截规则
     id: 1745160402
   - enabled: true
-    url: https://slink.ltd/https://raw.githubusercontent.com/BlueSkyXN/AdGuardHomeRules/master/skyrules.txt
+    url: https://gcore.jsdelivr.net/gh/BlueSkyXN/AdGuardHomeRules@master/skyrules.txt
     name: AdGuardHomeRules
     id: 1745160411
   - enabled: true
@@ -129,7 +129,7 @@ filters:
     id: 1745160416
 whitelist_filters:
   - enabled: true
-    url: https://slink.ltd/https://raw.githubusercontent.com/BlueSkyXN/AdGuardHomeRules/master/ok.txt
+    url: https://gcore.jsdelivr.net/gh/BlueSkyXN/AdGuardHomeRules@master/ok.txt
     name: AdGuardHomeRules
     id: 1745160410
 user_rules:
