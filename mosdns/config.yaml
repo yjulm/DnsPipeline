@@ -28,6 +28,7 @@ plugins:
         - "../rule_data/domain-list-custom/tld-cn.txt" # 域名后缀
         - "../rule_data/v2ray-rules-dat/apple-cn.txt" # 常见活跃域名
         - "../rule_data/v2ray-rules-dat/google-cn.txt"
+        - "../rule_data/domain-list-community/cn.txt" # 原始仓库数据，下方的定制版本缺少了一些常见的，但也补充了一些没有的，虽然两者都大部分都是重复的
         - "../rule_data/domain-list-custom/geolocation-cn.txt" # 通用性大批量域名
         #- "../rule_data/v2ray-rules-dat/china-list.txt"
 
@@ -49,12 +50,14 @@ plugins:
         - "../rule_data/domain-list-custom/category-ads-all.txt" # 广告域名合集
         #- "../rule_data/v2ray-rules-dat/reject-list.txt" # 通用性大批量域名
 
-  - tag: "ipPrivate"
+  # 在处理 a.tile.opentopomap.org 这类型被污染的域名时候，基于普通UDP协议的查询，查询的DNS服务器位于国外时候则会被劫持
+  # 并返回一个替换为被防火墙长期阻断的ip，即便查询的是NS记录，甚至使用一个不存在的DNS服务器，也能收到一个污染IP
+  # 劫持也会影响国内大型DNS厂商的回源查询，即便连接了国内厂商的DOH也没有作用，因为厂商也会在回源时拿到一个污染的数据
+  - tag: "ipBlocked"
     type: "ip_set"
     args:
-      ips:
-        - 0.0.0.0/32
-        - ::/128
+      files:
+        - "../rule_data/GFWIP/gfw_ip_list.txt"
 
   - tag: "ipDirect"
     type: "ip_set"
@@ -121,7 +124,7 @@ plugins:
       - matches:
           - "!mark 99099"
           - qname $domainDirect
-        exec: mark 99099 99100 # 99100 标记匹配国内域名
+        exec: mark 99099 99100 # 99100 标记匹配国内域名，必须优先尝试匹配国内，以应对国际域名有国内CDN而被标记为@cn
       - matches:
           - "!mark 99099"
           - qname $domainRegexDirect
@@ -138,6 +141,10 @@ plugins:
     args:
       - matches:
           - "!mark 815399" # 还没有成功匹配IP
+          - resp_ip $ipBlocked # 应答IP在被污染阻断CIDR段，必须优先匹配污染CIDR段，存在部分污染IP来自环大陆区域和主流CDN厂商
+        exec: mark 815399 815300 # 815300 标记DNS污染的CIDR段
+      - matches:
+          - "!mark 815399"
           - resp_ip $ipCDN # 应答IP在CDN
         exec: mark 815399 815301 # 815301 标记CDN IP
       - matches:
@@ -169,6 +176,8 @@ plugins:
   - tag: "printMatchRespIp"
     type: "sequence"
     args:
+      - matches: mark 815300
+        exec: query_summary _MATCH_IP_BLOCKED_
       - matches: mark 815301
         exec: query_summary _MATCH_IP_CDN_NET_
       - matches: mark 815302
@@ -330,8 +339,12 @@ plugins:
           - has_resp
           - has_wanted_ans
         exec: jump fallbackMatchRespIp
+      - matches: mark 815300 # 检测到了被污染阻断的CIDR段
+        exec: jump fallbackDropResp
       - matches: mark 815398 # 执行了IP匹配，但没有命中任何匹配项
         exec: jump fallbackDropResp
+      - matches: "!has_resp"
+        exec: mark 815355 # 815355 标记过滤后无应答状态
 
   - tag: "fallbackCheckResp"
     type: "sequence"
@@ -455,7 +468,13 @@ plugins:
         exec: query_summary fallbackDirectCall
       - exec: jump fallbackTryDirect
       - exec: jump fallbackTryFilterIp # 在国际域名有国内CDN的场景下，需要对其应答进行环大陆IP检测
-      - matches: "!has_resp"
+      - matches:
+          - mark 815355 # 过滤后无应答
+          - mark 815300 # 检测到了污染应答，则服务器位于国内的DOH服务商，以及普通查询已经不再可靠，需要切换到加密查询
+        exec: jump fallbackTryBackup
+      - matches:
+          - mark 815355 # 过滤后无应答，没有应答存在三种情况。一是单纯的响应失败，二是 815398 标记未命中环大陆而主动丢弃，三是 815300 标记检测到污染应答而主动丢弃
+          - "!mark 815300" #排除到受污染阻断的情况
         exec: jump fallbackTryStandby
       - exec: jump fallbackTryCachePush
 
@@ -468,7 +487,9 @@ plugins:
       # 同时如果查询来自规则外，则还会执行ip优选，也可能被丢弃。
       - exec: jump fallbackTryProxy # 没有cache 再代理查询
       - exec: jump fallbackTryFilterIp # 因为有备选方案，所以先检测是否有期望应答，再进行环大陆IP筛选
-      - matches: "!has_resp"
+      - matches:
+          - mark 815355 # 过滤后无应答，没有应答存在两种情况。一是单纯的响应失败，二是未命中环大陆而主动丢弃
+          - "!mark 815398" # 排除未命中环大陆的情况，只是单纯的响应失败，如果是未命中环大陆导致的无应答，则不在继续使用备份查询，而是让其回退到fallbackSecondCall
         exec: jump fallbackTryBackup # 仍旧没有则执行备用方案
       - exec: jump fallbackTryCachePush
 
@@ -560,11 +581,7 @@ plugins:
       - exec: jump processTryCachePull
       - exec: jump processMatchDomain
 
-      # 既匹配国际域名也匹配国内域名，可能某些国外web静态资源加速域名在国内有CDN
-      - matches:
-          - mark 99200
-          - mark 99100
-        exec: goto fallbackDirectCall
+      # 既匹配国际域名也匹配国内域名，可能某些国外web静态资源加速域名在国内有CDN，则此时会当作国内域名处理
       - matches: mark 99200 # 先匹配国际域名
         exec: goto fallbackProxyCall
       - matches: mark 99100 # 再匹配国内域名
